@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Airflow Lab — seeing the Navier-Stokes equations</title>
+<meta name="description" content="An interactive 3D wind-tunnel: watch real airflow over a wing go from smooth to turbulent, and see the phenomenon behind the Navier-Stokes Millennium Problem." />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" crossorigin="anonymous" />
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" crossorigin="anonymous"></script>
+<style>
+  :root{
+    --bg:#0b1622;          /* deep wind-tunnel slate */
+    --bg2:#0f1d2e;
+    --panel:#12233650;
+    --stroke:#25405c;
+    --ink:#e8f0f7;
+    --ink-dim:#9db3c8;
+    --amber:#f4b53f;       /* warm instrument accent against cool flow */
+    --amber-deep:#e0932a;
+    --laminar:#4fd1e6;
+    --turb:#ff6a5c;
+    --font:"Space Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--font)}
+  #app{position:fixed;inset:0;overflow:hidden}
+  canvas{display:block}
+
+  /* ---- Title strip ---- */
+  .titlebar{
+    position:absolute;top:0;left:0;right:0;z-index:5;
+    display:flex;align-items:baseline;gap:14px;
+    padding:16px 20px;pointer-events:none;
+  }
+  .titlebar h1{
+    font-size:19px;font-weight:600;letter-spacing:-0.01em;margin:0;
+    text-shadow:0 2px 18px #000a;
+  }
+  .titlebar .sub{font-size:13px;color:var(--ink-dim);font-weight:400}
+  @media (max-width:720px){ .titlebar .sub{display:none} }
+
+  /* ---- Control dock ---- */
+  .dock{
+    position:absolute;top:64px;right:16px;z-index:6;width:288px;
+    background:linear-gradient(180deg,#12233688,#0d1a28cc);
+    border:1px solid var(--stroke);border-radius:14px;
+    backdrop-filter:blur(10px);
+    box-shadow:0 18px 50px #0009;
+    padding:16px 16px 18px;
+  }
+  .dock h2{font-size:11px;font-weight:600;letter-spacing:.14em;color:var(--ink-dim);margin:0 0 12px;text-transform:uppercase}
+  .ctrl{margin-bottom:15px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .ctrl label{font-size:13.5px;font-weight:500}
+  .ctrl .val{font-size:12.5px;color:var(--amber);font-variant-numeric:tabular-nums}
+  input[type=range]{
+    -webkit-appearance:none;width:100%;height:4px;border-radius:3px;
+    background:linear-gradient(90deg,var(--laminar),var(--amber),var(--turb));
+    outline:none;margin:0;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:#fff;border:2px solid var(--amber-deep);cursor:pointer;box-shadow:0 1px 6px #000a
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--amber-deep);cursor:pointer
+  }
+  .seg{display:flex;gap:6px;margin-top:4px}
+  .seg button{
+    flex:1;font-family:var(--font);font-size:12.5px;font-weight:500;
+    color:var(--ink-dim);background:#0d1a28;border:1px solid var(--stroke);
+    padding:7px 4px;border-radius:8px;cursor:pointer;transition:.15s
+  }
+  .seg button.on{color:#0b1622;background:var(--amber);border-color:var(--amber)}
+  .seg button:hover:not(.on){color:var(--ink);border-color:#38597d}
+  .modecap{font-size:12px;color:var(--ink-dim);margin-top:8px;line-height:1.4}
+
+  .presets{display:flex;gap:8px;margin-top:2px}
+  .presets button{
+    flex:1;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;
+    padding:9px 6px;border-radius:9px;border:1px solid var(--stroke);background:#0d1a28;color:var(--ink);
+    transition:.15s
+  }
+  .presets button:hover{border-color:#38597d;transform:translateY(-1px)}
+  .presets button .k{display:block;font-size:10.5px;font-weight:500;color:var(--ink-dim);margin-top:2px}
+
+  .util{display:flex;gap:8px;margin-top:6px}
+  .util button{
+    flex:1;font-family:var(--font);font-size:12.5px;cursor:pointer;color:var(--ink-dim);
+    background:transparent;border:1px solid var(--stroke);border-radius:8px;padding:8px;transition:.15s
+  }
+  .util button:hover{color:var(--ink);border-color:#38597d}
+
+  /* ---- Regime readout ---- */
+  .regime{
+    position:absolute;left:16px;bottom:16px;z-index:6;
+    display:flex;align-items:center;gap:12px;
+    background:#0d1a28cc;border:1px solid var(--stroke);border-radius:12px;
+    padding:12px 15px;backdrop-filter:blur(8px);max-width:min(430px,calc(100% - 32px))
+  }
+  .dot{width:11px;height:11px;border-radius:50%;flex:none;box-shadow:0 0 12px currentColor}
+  .regime .name{font-size:14px;font-weight:600}
+  .regime .desc{font-size:12.5px;color:var(--ink-dim);line-height:1.35;margin-top:1px}
+
+  /* ---- Explainer ---- */
+  .learn-btn{
+    position:absolute;left:16px;top:60px;z-index:6;
+    font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;
+    color:var(--amber);background:#0d1a28cc;border:1px solid var(--amber-deep);
+    padding:8px 14px;border-radius:20px;backdrop-filter:blur(8px)
+  }
+  .sheet{
+    position:absolute;inset:0;z-index:20;display:none;
+    background:#07101a;overflow-y:auto
+  }
+  .sheet.open{display:block}
+  .sheet .wrap{max-width:680px;margin:0 auto;padding:64px 26px 90px}
+  .sheet h2{font-size:26px;letter-spacing:-0.02em;margin:0 0 6px}
+  .sheet .lede{color:var(--ink-dim);font-size:15px;line-height:1.6;margin:0 0 30px}
+  .sheet h3{font-size:15px;color:var(--amber);margin:30px 0 8px;letter-spacing:.01em}
+  .sheet p{font-size:15px;line-height:1.68;color:#cfdcea;margin:0 0 14px}
+  .sheet .eq{
+    background:#0d1a28;border:1px solid var(--stroke);border-left:3px solid var(--amber);
+    border-radius:10px;padding:18px 16px;margin:16px 0;color:#eaf2fa;overflow-x:auto;
+    text-align:center;font-size:17px
+  }
+  .sheet .eq .katex{color:#eaf2fa}
+  .sheet .close{
+    position:fixed;top:18px;right:20px;z-index:21;cursor:pointer;font-size:14px;font-weight:600;
+    color:var(--ink);background:#12233688;border:1px solid var(--stroke);border-radius:20px;padding:8px 16px
+  }
+  .sheet ul{padding-left:18px;margin:0 0 14px}
+  .sheet li{font-size:15px;line-height:1.6;color:#cfdcea;margin-bottom:7px}
+  .note{font-size:13px;color:var(--ink-dim);border-top:1px solid var(--stroke);padding-top:16px;margin-top:30px;line-height:1.6}
+
+  .hint{position:absolute;left:50%;bottom:78px;transform:translateX(-50%);z-index:4;
+    font-size:12.5px;color:var(--ink-dim);background:#0d1a2899;padding:6px 12px;border-radius:16px;
+    pointer-events:none;transition:opacity .6s}
+
+  .contact-btn{position:absolute;top:18px;right:18px;z-index:8;font-family:var(--font);
+    font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink);background:#0d1a28cc;
+    border:1px solid var(--stroke);border-radius:20px;padding:8px 14px;backdrop-filter:blur(8px)}
+  .contact-btn:hover{border-color:var(--amber-deep);color:var(--amber)}
+  .contact-card{position:absolute;top:60px;right:18px;z-index:8;display:none;
+    background:#0d1a28f2;border:1px solid var(--stroke);border-radius:12px;padding:14px 16px;
+    backdrop-filter:blur(10px);box-shadow:0 12px 40px #000a;min-width:220px}
+  .contact-card.open{display:block}
+  .contact-card .cc-name{font-weight:600;font-size:14px;margin-bottom:6px}
+  .contact-card .cc-row{font-size:12.5px;color:var(--ink-dim);margin:3px 0}
+  .contact-card .cc-row a{color:var(--amber);text-decoration:none}
+  .contact-card .cc-row a:hover{text-decoration:underline}
+  .disclaimer{position:absolute;bottom:14px;right:16px;z-index:5;font-size:11px;
+    color:var(--ink-dim);opacity:0.72;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="titlebar">
+    <h1>Airflow Lab</h1>
+    <span class="sub">watch the Navier-Stokes equations turn smooth flow into turbulence</span>
+  </div>
+
+  <button class="learn-btn" id="learnBtn">What am I looking at?</button>
+
+  <button class="contact-btn" id="contactBtn">Made by Adidev Panday</button>
+  <div class="contact-card" id="contactCard">
+    <div class="cc-name">Adidev Panday</div>
+    <div class="cc-row">email: panday.adidev</div>
+    <div class="cc-row"><a href="https://linkedin.com/adidevpanday" target="_blank" rel="noopener">linkedin.com/adidevpanday</a></div>
+  </div>
+
+  <div class="disclaimer">Disclaimer: Made using the assistance of Claude Code</div>
+
+  <div class="dock">
+    <h2>Wind tunnel</h2>
+
+    <div class="ctrl">
+      <div class="row"><label>Reynolds number</label><span class="val" id="reVal">120</span></div>
+      <input type="range" id="re" min="1.4" max="4.2" step="0.01" value="2.08" />
+    </div>
+
+    <div class="ctrl">
+      <div class="row"><label>Flow speed</label><span class="val" id="spdVal">1.0×</span></div>
+      <input type="range" id="spd" min="0.4" max="2.2" step="0.01" value="1.0" />
+    </div>
+
+    <div class="ctrl">
+      <div class="row"><label>Object</label></div>
+      <div class="seg" id="shapeSeg">
+        <button data-shape="f1" class="on">F1 car</button>
+        <button data-shape="plane">Plane</button>
+        <button data-shape="cow">Cow</button>
+      </div>
+    </div>
+
+    <div class="ctrl">
+      <div class="row"><label>Angle of attack</label><span class="val" id="aoaVal">6°</span></div>
+      <input type="range" id="aoa" min="-14" max="18" step="1" value="6" />
+    </div>
+
+    <div class="ctrl">
+      <div class="row"><label>Show</label></div>
+      <div class="seg" id="modeSeg">
+        <button data-mode="speed" class="on">Speed</button>
+        <button data-mode="vort">Vorticity</button>
+        <button data-mode="dark">Particles</button>
+      </div>
+      <div class="modecap" id="modeCap">Colour = how fast the air is moving at each point.</div>
+    </div>
+
+    <div class="ctrl">
+      <div class="row"><label>Presets</label></div>
+      <div class="presets">
+        <button id="pLam">Laminar<span class="k">smooth, low Re</span></button>
+        <button id="pTurb">Turbulent<span class="k">shedding, high Re</span></button>
+      </div>
+    </div>
+
+    <div class="util">
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset flow</button>
+    </div>
+  </div>
+
+  <div class="regime">
+    <div class="dot" id="regimeDot" style="color:var(--laminar)"></div>
+    <div>
+      <div class="name" id="regimeName">Laminar flow</div>
+      <div class="desc" id="regimeDesc">Air slides over the wing in smooth, orderly sheets. The equations stay well-behaved.</div>
+    </div>
+  </div>
+
+  <div class="hint" id="hint">Drag to orbit • scroll to zoom</div>
+</div>
+
+<!-- Explainer sheet -->
+<div class="sheet" id="sheet">
+  <button class="close" id="closeSheet">Close</button>
+  <div class="wrap">
+    <h2>Seeing the Navier-Stokes equations</h2>
+    <p class="lede">Every wing, weather system, and river obeys one set of equations. This wind tunnel solves a version of them live, so you can watch orderly flow break down into turbulence — the exact phenomenon behind a million-dollar open problem in mathematics.</p>
+
+    <h3>The equations</h3>
+    <p>The Navier-Stokes equations say that a fluid's momentum changes because of three things: the fluid pushing itself around, pressure differences, and internal friction (viscosity).</p>
+    <div class="eq" id="eq1"></div>
+    <p>Here <b>u</b> is the velocity of the air at every point, p is pressure, ρ is density, ν is viscosity, and <b>f</b> is any external force. The second equation just says the air isn't compressed — what flows in flows out.</p>
+
+    <h3>The Reynolds number is the dial that matters</h3>
+    <p>The single number that decides whether flow stays smooth or turns chaotic is the Reynolds number: how strongly the air's own motion dominates over its internal friction.</p>
+    <div class="eq" id="eq2"></div>
+    <p>Low Re means friction wins and flow stays laminar and glassy. High Re means the fluid's own momentum wins, and you get the swirling, shedding vortices you can trigger with the slider. Turn the Reynolds dial up and watch the wake fall apart into a repeating trail of vortices — a von Kármán vortex street.</p>
+
+    <h3>Why this is a Millennium Problem</h3>
+    <p>The Clay Mathematics Institute offers a $1,000,000 prize for the Navier-Stokes existence and smoothness problem. In three dimensions, nobody has been able to prove that smooth starting conditions always stay smooth forever — or find a case where the maths "blows up" into an infinite value. Turbulence, the thing you see forming in the wake here, is exactly what makes this so hard: the equations resist every known method.</p>
+    <p>In September 2026 this made global news when a proof was announced for a <em>forced</em> version of the 3D problem, and the Clay Institute said the problem had "apparently been settled." Credit and verification are still being worked through, and the classic <em>unforced</em> turbulence question that matters most for real aircraft is still not fully closed. So this remains one of the most alive problems in physics and maths.</p>
+
+    <h3>What this simulation is (and isn't)</h3>
+    <ul>
+      <li>It solves a real 2D incompressible fluid model in your browser, in real time, using the "stable fluids" method with vorticity confinement to keep vortices crisp.</li>
+      <li>The Reynolds number is indicative: it maps to the solver's viscosity so you can see the laminar-to-turbulent transition, not to publish a precise drag figure.</li>
+      <li>It is a teaching visualiser — the goal is intuition about why turbulence is hard, not an engineering-grade CFD result.</li>
+    </ul>
+
+    <p class="note">Built for the Woodstock School physics department as a teaching tool. Airflow over a NACA-style airfoil; drag to orbit the tunnel, adjust the wing's angle, and push the Reynolds number to feel where smooth flow ends.</p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+/* ============================================================
+   Airflow Lab
+   Real-time 2D incompressible fluid (Stam "stable fluids" +
+   vorticity confinement), visualised in 3D with Three.js.
+   ============================================================ */
+
+// ---------- grid ----------
+const NX = 200, NY = 100;         // simulation grid
+const IX = (i,j)=> i + NX*j;
+const size = NX*NY;
+
+let u   = new Float32Array(size);   // x velocity
+let v   = new Float32Array(size);   // y velocity
+let u0  = new Float32Array(size);
+let v0  = new Float32Array(size);
+let p   = new Float32Array(size);
+let div = new Float32Array(size);
+let curl= new Float32Array(size);
+let solid = new Uint8Array(size);   // airfoil mask (1 = wall)
+
+// ---------- parameters (driven by UI) ----------
+const params = {
+  Re: 120,
+  speed: 1.0,
+  aoa: 6,
+  mode: 'speed',
+  shape: 'f1',
+  paused: false,
+};
+const U_BASE = 1.0;                  // base inflow (grid units/step)
+
+function viscFromRe(Re){
+  // map Reynolds number to a solver viscosity that shows the transition.
+  // higher Re -> lower viscosity -> vortex shedding.
+  return Math.max(0.00002, 0.9 / Re);
+}
+function confinementFromRe(Re){
+  // more vorticity confinement at high Re to keep turbulent eddies crisp.
+  // kept small — this is a force injection and will blow up if large.
+  return Math.min(0.30, Math.max(0.0, (Re-80)/9000));
+}
+
+// ---------- obstacle shapes ----------
+function nacaThickness(x, t){ // x in [0,1], t=max thickness fraction
+  return 5*t*(0.2969*Math.sqrt(x) -0.1260*x -0.3516*x*x +0.2843*x*x*x -0.1015*x*x*x*x);
+}
+
+// centre + reference size shared by mask and 3D mesh
+const OBS = { cx: NX*0.34, cy: NY*0.5 };
+let obstacleOutline = [];   // world [x,y] points for extrude meshes
+let obstacleKind = 'poly';
+
+// side-view silhouettes derived from the actual 3D models (x downstream, y up), nose faces -x
+const SIL = {
+  f1: [[0.352,-0.110],[0.328,-0.110],[0.288,-0.083],[-0.297,-0.086],[-0.331,-0.107],[-0.366,-0.107],[-0.405,-0.081],[-0.450,-0.090],[-0.500,-0.074],[-0.501,-0.066],[-0.471,-0.024],[-0.424,-0.019],[-0.364,0.031],[-0.333,0.031],[-0.316,0.021],[-0.159,0.021],[-0.137,0.041],[-0.104,0.033],[-0.054,0.038],[-0.052,0.058],[-0.039,0.079],[-0.023,0.081],[-0.007,0.073],[-0.004,0.110],[0.007,0.094],[0.011,0.041],[0.026,0.108],[0.051,0.110],[0.314,0.026],[0.365,0.035],[0.329,0.058],[0.329,0.089],[0.350,0.110],[0.474,0.102],[0.496,0.087],[0.501,0.070],[0.496,-0.020],[0.462,-0.055],[0.407,-0.064],[0.378,-0.098]],
+  plane: [[-0.154,-0.171],[-0.129,-0.160],[-0.127,-0.131],[-0.143,-0.122],[-0.133,-0.085],[0.448,-0.020],[0.458,0.038],[0.501,0.169],[0.409,0.173],[0.290,0.054],[0.116,0.023],[0.008,0.023],[-0.023,0.042],[-0.054,0.046],[-0.056,0.056],[-0.099,0.068],[-0.223,0.080],[-0.264,0.066],[-0.319,0.023],[-0.462,0.004],[-0.458,0.074],[-0.462,0.082],[-0.468,0.079],[-0.470,0.005],[-0.501,-0.012],[-0.470,-0.029],[-0.467,-0.106],[-0.458,-0.100],[-0.462,-0.030],[-0.436,-0.063],[-0.402,-0.080],[-0.323,-0.092],[-0.166,-0.085],[-0.160,-0.124],[-0.174,-0.131],[-0.177,-0.157],[-0.154,-0.171]],
+  cow: [[0.419,-0.276],[0.486,-0.273],[0.499,-0.224],[0.501,-0.064],[0.489,-0.050],[0.480,0.031],[0.482,0.220],[0.475,0.246],[0.455,0.269],[0.428,0.276],[0.350,0.276],[0.085,0.249],[-0.099,0.254],[-0.209,0.240],[-0.302,0.240],[-0.350,0.276],[-0.369,0.276],[-0.499,0.131],[-0.501,0.112],[-0.478,0.085],[-0.328,0.106],[-0.276,0.068],[-0.186,-0.021],[-0.152,-0.073],[-0.110,-0.091],[-0.107,-0.134],[-0.096,-0.165],[-0.096,-0.215],[-0.105,-0.246],[-0.133,-0.273],[-0.067,-0.272],[-0.060,-0.224],[-0.064,-0.160],[-0.050,-0.079],[0.004,-0.046],[0.015,-0.046],[0.092,-0.066],[0.197,-0.066],[0.254,-0.056],[0.292,-0.087],[0.321,-0.092],[0.328,-0.106],[0.337,-0.105],[0.343,-0.089],[0.354,-0.089],[0.362,-0.104],[0.371,-0.104],[0.375,-0.091],[0.409,-0.063],[0.458,-0.146],[0.463,-0.186],[0.454,-0.239]]
+};
+
+function nacaThickness(x, t){ return 5*t*(0.2969*Math.sqrt(x) -0.1260*x -0.3516*x*x +0.2843*x*x*x -0.1015*x*x*x*x); }
+function pointInPoly(x,y,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+
+function buildObstacle(shape, aoaDeg){
+  solid.fill(0);
+  const cx=OBS.cx, cy=OBS.cy;
+  const a=-aoaDeg*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
+  obstacleOutline=[];
+  const toWorld=(lx,ly)=>[cx+ca*lx - sa*ly, cy+sa*lx + ca*ly];
+
+  if(shape==='wing'){
+    const chord=NX*0.34, t=0.14;
+    for(let j=0;j<NY;j++)for(let i=0;i<NX;i++){
+      const dx=i-cx+chord*0.5, dy=j-cy;
+      const rx=ca*dx+sa*dy, ry=-sa*dx+ca*dy;
+      const xc=rx/chord;
+      if(xc>=0&&xc<=1 && Math.abs(ry)<=nacaThickness(xc,t)*chord) solid[IX(i,j)]=1;
+    }
+    const top=[],bot=[];
+    for(let s=0;s<=40;s++){
+      const xc=s/40, half=nacaThickness(xc,t)*chord, rx=xc*chord-chord*0.5;
+      top.push(toWorld(rx,+half)); bot.push(toWorld(rx,-half));
+    }
+    obstacleOutline=top.concat(bot.reverse());
+  } else {
+    const S=NX*0.32;
+    const local=(SIL[shape]||SIL.f1).map(p=>[p[0]*S, p[1]*S]);
+    for(let j=0;j<NY;j++)for(let i=0;i<NX;i++){
+      const dx=i-cx, dy=j-cy;
+      const lx=ca*dx+sa*dy, ly=-sa*dx+ca*dy;
+      if(pointInPoly(lx,ly,local)) solid[IX(i,j)]=1;
+    }
+    local.forEach(p=>obstacleOutline.push(toWorld(p[0],p[1])));
+  }
+
+  for(let k=0;k<size;k++) if(solid[k]){ u[k]=0; v[k]=0; }
+}
+function buildAirfoil(aoaDeg){ buildObstacle(params.shape, aoaDeg); }
+
+// ---------- boundary conditions ----------
+function setBounds(){
+  // inflow on left, outflow on right, free-slip top/bottom, no-slip in solid
+  const U = U_BASE*params.speed;
+  for(let j=0;j<NY;j++){
+    u[IX(0,j)] = U;  v[IX(0,j)] = 0;                 // inlet
+    u[IX(NX-1,j)] = u[IX(NX-2,j)];                   // outlet (copy)
+    v[IX(NX-1,j)] = v[IX(NX-2,j)];
+  }
+  for(let i=0;i<NX;i++){
+    v[IX(i,0)] = 0;       u[IX(i,0)] = u[IX(i,1)];
+    v[IX(i,NY-1)] = 0;    u[IX(i,NY-1)] = u[IX(i,NY-2)];
+  }
+  for(let k=0;k<size;k++) if(solid[k]){ u[k]=0; v[k]=0; }
+}
+
+// ---------- Jacobi diffuse ----------
+function diffuse(field, field0, visc){
+  const a = visc*NX*NY*0.0006;
+  if(a < 1e-6){ field.set(field0); return; }
+  for(let it=0; it<12; it++){
+    for(let j=1;j<NY-1;j++){
+      for(let i=1;i<NX-1;i++){
+        const k=IX(i,j);
+        if(solid[k]) { field[k]=0; continue; }
+        field[k] = (field0[k] + a*(field[k-1]+field[k+1]+field[k-NX]+field[k+NX]))/(1+4*a);
+      }
+    }
+  }
+}
+
+// ---------- semi-Lagrangian advect ----------
+function advect(d, d0, uu, vv){
+  for(let j=1;j<NY-1;j++){
+    for(let i=1;i<NX-1;i++){
+      const k=IX(i,j);
+      if(solid[k]){ d[k]=0; continue; }
+      let x = i - uu[k];
+      let y = j - vv[k];
+      if(x<0.5)x=0.5; if(x>NX-1.5)x=NX-1.5;
+      if(y<0.5)y=0.5; if(y>NY-1.5)y=NY-1.5;
+      const i0=Math.floor(x), i1=i0+1;
+      const j0=Math.floor(y), j1=j0+1;
+      const s1=x-i0, s0=1-s1, t1=y-j0, t0=1-t1;
+      d[k] = s0*(t0*d0[IX(i0,j0)]+t1*d0[IX(i0,j1)])
+           + s1*(t0*d0[IX(i1,j0)]+t1*d0[IX(i1,j1)]);
+    }
+  }
+}
+
+// ---------- pressure projection ----------
+function project(){
+  for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+    const k=IX(i,j);
+    if(solid[k]){ div[k]=0; p[k]=0; continue; }
+    div[k] = -0.5*((u[k+1]-u[k-1])+(v[k+NX]-v[k-NX]));
+    p[k]=0;
+  }
+  for(let it=0; it<24; it++){
+    for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+      const k=IX(i,j);
+      if(solid[k]) continue;
+      p[k] = (div[k] + p[k-1]+p[k+1]+p[k-NX]+p[k+NX])/4;
+    }
+  }
+  for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+    const k=IX(i,j);
+    if(solid[k]) continue;
+    u[k] -= 0.5*(p[k+1]-p[k-1]);
+    v[k] -= 0.5*(p[k+NX]-p[k-NX]);
+  }
+}
+
+// ---------- vorticity confinement (keeps eddies from smearing) ----------
+function vorticityConfine(eps){
+  if(eps<=0) return;
+  for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+    const k=IX(i,j);
+    curl[k] = solid[k]?0:0.5*((v[k+1]-v[k-1]) - (u[k+NX]-u[k-NX]));
+  }
+  for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+    const k=IX(i,j);
+    if(solid[k]) continue;
+    let nx = Math.abs(curl[k+1])-Math.abs(curl[k-1]);
+    let ny = Math.abs(curl[k+NX])-Math.abs(curl[k-NX]);
+    const len = Math.hypot(nx,ny)+1e-6;
+    nx/=len; ny/=len;
+    u[k] += eps * ny * curl[k] * 0.5;
+    v[k] += eps * -nx * curl[k] * 0.5;
+  }
+}
+
+// ---------- safety clamp: keep velocities bounded ----------
+function clampVel(){
+  const cap = 6.0*Math.max(1,params.speed);
+  for(let k=0;k<size;k++){
+    if(u[k]>cap)u[k]=cap; else if(u[k]<-cap)u[k]=-cap;
+    if(v[k]>cap)v[k]=cap; else if(v[k]<-cap)v[k]=-cap;
+    if(Number.isNaN(u[k]))u[k]=0;
+    if(Number.isNaN(v[k]))v[k]=0;
+  }
+}
+
+// ---------- one simulation step ----------
+function step(){
+  const visc = viscFromRe(params.Re);
+  setBounds();
+
+  // diffuse
+  u0.set(u); v0.set(v);
+  diffuse(u, u0, visc); diffuse(v, v0, visc);
+  setBounds();
+  project();
+
+  // advect
+  u0.set(u); v0.set(v);
+  advect(u, u0, u0, v0);
+  advect(v, v0, u0, v0);
+  setBounds();
+
+  vorticityConfine(confinementFromRe(params.Re));
+  setBounds();
+  project();
+  clampVel();
+}
+
+/* ============================================================
+   Rendering (Three.js): a flow-field plane + 3D particle sheet
+   ============================================================ */
+let renderer, scene, camera;
+let fieldCol, fieldMesh, foilMesh;
+let particles, pPos, pAge, pCol, pStream, PN = 26000;
+let particleSprite;
+const STREAMS = 120;                      // number of smoke streamlines
+let orbit = {az:0.0, el:0.42, r:150, tAz:0.0, tEl:0.42, tR:150};
+
+const domW = NX, domH = NY;
+
+function turbo(t){ // turbo-ish colormap, t in [0,1] -> [r,g,b] 0..1
+  t=Math.min(1,Math.max(0,t));
+  const r=Math.max(0,Math.min(255, 34.61 +t*(1172.33+t*(-10793.56+t*(33300.12+t*(-38394.49+t*14825.05))))))/255;
+  const g=Math.max(0,Math.min(255, 23.31 +t*(557.33+t*(1225.33+t*(-3574.96+t*(3220.38-t*1073.77))))))/255;
+  const b=Math.max(0,Math.min(255, 27.2  +t*(3211.1+t*(-15327.97+t*(27814+t*(-22569.18+t*6838.66))))))/255;
+  return [r,g,b];
+}
+
+function makeGlowSprite(){
+  const s=64, cv=document.createElement('canvas'); cv.width=cv.height=s;
+  const ctx=cv.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(0.25,'rgba(255,255,255,0.9)');
+  g.addColorStop(0.55,'rgba(255,255,255,0.35)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  const t=new THREE.CanvasTexture(cv);
+  t.needsUpdate=true;
+  return t;
+}
+
+// bright flow colour ramp for particles: teal -> white -> amber, with a luminance floor
+function flowColor(t){
+  t=Math.min(1,Math.max(0,t));
+  let r,g,b;
+  if(t<0.5){ const k=t/0.5; r=0.30+0.70*k; g=0.85+0.15*k; b=0.95; }      // teal -> white
+  else     { const k=(t-0.5)/0.5; r=1.0; g=1.0-0.30*k; b=0.95-0.75*k; }  // white -> amber
+  return [r,g,b];
+}
+
+function initThree(){
+  const app=document.getElementById('app');
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setClearColor(0x0b1622,1);
+  app.appendChild(renderer.domElement);
+
+  scene=new THREE.Scene();
+  scene.fog=new THREE.FogExp2(0x0b1622,0.0016);
+  camera=new THREE.PerspectiveCamera(46,innerWidth/innerHeight,1,2000);
+
+  // flow-field plane — vertex colours (robust, no texture upload quirks)
+  const segX = NX-1, segY = NY-1;
+  const planeGeo=new THREE.PlaneGeometry(domW,domH,segX,segY);
+  fieldCol=new Float32Array((NX)*(NY)*3);
+  planeGeo.setAttribute('color',new THREE.BufferAttribute(fieldCol,3));
+  const planeMat=new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,fog:false});
+  fieldMesh=new THREE.Mesh(planeGeo,planeMat);
+  fieldMesh.position.set(domW/2,domH/2,-1);
+  scene.add(fieldMesh);
+
+  // subtle floor grid for depth
+  const grid2=new THREE.GridHelper(domW*1.6,26,0x1d3349,0x152a3f);
+  grid2.rotation.x=Math.PI/2;
+  grid2.position.set(domW/2,domH/2,-14);
+  scene.add(grid2);
+
+  // particles — clean wind-tunnel smoke streams
+  particleSprite = makeGlowSprite();
+  const g=new THREE.BufferGeometry();
+  pPos=new Float32Array(PN*3);
+  pCol=new Float32Array(PN*3);
+  pAge=new Float32Array(PN);
+  pStream=new Float32Array(PN);
+  for(let n=0;n<PN;n++) seedParticle(n,true);
+  g.setAttribute('position',new THREE.BufferAttribute(pPos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(pCol,3));
+  const pmat=new THREE.PointsMaterial({
+    size:2.2, map:particleSprite, vertexColors:true,
+    transparent:true, opacity:0.95, depthWrite:false,
+    depthTest:false, blending:THREE.AdditiveBlending, sizeAttenuation:true
+  });
+  particles=new THREE.Points(g,pmat);
+  particles.renderOrder=2;
+  scene.add(particles);
+
+  buildFoilMesh();
+  addEventListeners();
+  onResize();
+}
+
+const MODEL_CFG = {
+  f1:    { url:'f1.glb',    rotY: Math.PI/2  },   // nose already -z, +90 puts nose at -x
+  plane: { url:'plane.glb', rotY:-Math.PI/2  },   // nose +z, -90 puts nose at -x
+  cow:   { url:'cow.glb',   rotY:-Math.PI/2  },
+};
+let gltfLoader=null, modelCache={};
+
+function ensureLights(){
+  if(scene.getObjectByName('key')) return;
+  const key=new THREE.DirectionalLight(0xffffff,1.1); key.name='key';
+  key.position.set(0.4,0.8,1.2); scene.add(key);
+  const fill=new THREE.DirectionalLight(0x9fc3e6,0.5); fill.position.set(-0.6,0.2,0.6); scene.add(fill);
+  scene.add(new THREE.HemisphereLight(0xbfd8f0,0x0b1622,0.7));
+}
+
+function extrudePlaceholder(){
+  if(!obstacleOutline.length) return null;
+  const pts=obstacleOutline.map(p=>new THREE.Vector2(p[0],p[1]));
+  const shape=new THREE.Shape(pts);
+  const geo=new THREE.ExtrudeGeometry(shape,{depth:14,bevelEnabled:false,steps:1});
+  const mat=new THREE.MeshStandardMaterial({color:0x1b3247,metalness:0.3,roughness:0.7,emissive:0x0b1826});
+  const m=new THREE.Mesh(geo,mat); m.position.z=-7;
+  return m;
+}
+
+function buildLoadedModel(gltfScene){
+  const inner=gltfScene.clone(true);
+  inner.traverse(o=>{ if(o.isMesh && o.material){ o.material.side=THREE.DoubleSide; o.castShadow=false; } });
+  // recenter model at origin
+  let box=new THREE.Box3().setFromObject(inner);
+  const c=box.getCenter(new THREE.Vector3());
+  inner.position.sub(c);
+  const pivot=new THREE.Group(); pivot.add(inner);
+  pivot.rotation.y = MODEL_CFG[params.shape].rotY;
+  // scale so length-along-flow (world x) == silhouette length (S)
+  box=new THREE.Box3().setFromObject(pivot);
+  const size=box.getSize(new THREE.Vector3());
+  const S=NX*0.32;
+  pivot.scale.setScalar(S/(size.x||1));
+  const grp=new THREE.Group(); grp.add(pivot);
+  grp.position.set(OBS.cx,OBS.cy,0);
+  grp.rotation.z = -params.aoa*Math.PI/180;
+  return grp;
+}
+
+function buildObstacleMesh(){
+  ensureLights();
+  if(foilMesh){ scene.remove(foilMesh); foilMesh=null; }
+  const cfg=MODEL_CFG[params.shape];
+  if(!cfg){ foilMesh=extrudePlaceholder(); if(foilMesh) scene.add(foilMesh); return; }
+
+  if(modelCache[params.shape]){
+    foilMesh=buildLoadedModel(modelCache[params.shape]); scene.add(foilMesh); return;
+  }
+  // placeholder while the GLB loads (near-instant for these small files)
+  foilMesh=extrudePlaceholder(); if(foilMesh) scene.add(foilMesh);
+  if(!gltfLoader) gltfLoader=new THREE.GLTFLoader();
+  const wanted=params.shape;
+  gltfLoader.load(cfg.url,(gltf)=>{
+    modelCache[wanted]=gltf.scene;
+    if(params.shape===wanted){                     // still showing this object
+      if(foilMesh){ scene.remove(foilMesh); }
+      foilMesh=buildLoadedModel(gltf.scene); scene.add(foilMesh);
+    }
+  }, undefined, (err)=>{ console.warn('GLB load failed:',cfg.url,err); });
+}
+function buildFoilMesh(){ buildObstacleMesh(); }
+
+function seedParticle(n, spread){
+  // each particle belongs to a fixed horizontal smoke stream (by index)
+  const s = n % STREAMS;
+  if(pStream) pStream[n]=s;
+  const gap = NY/STREAMS;
+  const yBase = (s+0.5)*gap;
+  pPos[n*3]   = spread ? Math.random()*NX : Math.random()*4;   // fill domain on first seed
+  pPos[n*3+1] = yBase + (Math.random()-0.5)*gap;               // jitter fills between streams
+  pPos[n*3+2] = (Math.random()-0.5)*10;
+  pAge[n]=spread ? Math.random()*260 : 0;
+}
+
+function sampleVel(x,y){
+  x=Math.min(NX-1.5,Math.max(0.5,x)); y=Math.min(NY-1.5,Math.max(0.5,y));
+  const i0=Math.floor(x),j0=Math.floor(y),i1=i0+1,j1=j0+1;
+  const s1=x-i0,s0=1-s1,t1=y-j0,t0=1-t1;
+  const uu=s0*(t0*u[IX(i0,j0)]+t1*u[IX(i0,j1)])+s1*(t0*u[IX(i1,j0)]+t1*u[IX(i1,j1)]);
+  const vv=s0*(t0*v[IX(i0,j0)]+t1*v[IX(i0,j1)])+s1*(t0*v[IX(i1,j0)]+t1*v[IX(i1,j1)]);
+  return [uu,vv];
+}
+
+function updateParticles(){
+  const show = params.mode==='dark';     // particles only in Particles mode
+  particles.visible = show;
+  if(!show || params.paused) return;     // hidden, or frozen while paused
+  for(let n=0;n<PN;n++){
+    let x=pPos[n*3], y=pPos[n*3+1];
+    const [uu,vv]=sampleVel(x,y);
+    const spd=Math.hypot(uu,vv);
+    x+=uu*1.5; y+=vv*1.5;
+    pAge[n]+=1;
+    const k=IX(Math.min(NX-1,Math.max(0,x|0)),Math.min(NY-1,Math.max(0,y|0)));
+    if(x>NX-2 || pAge[n]>320 || solid[k] || x<0 || y<1 || y>NY-1){
+      seedParticle(n,false);
+      x=pPos[n*3]; y=pPos[n*3+1];
+    }
+    pPos[n*3]=x; pPos[n*3+1]=y;
+    // colour by speed: cool cyan (slow) -> white -> warm (fast), with a floor
+    const norm=Math.min(1, spd/(1.7*params.speed)+0.05);
+    const c=flowColor(norm);
+    pCol[n*3]=c[0]; pCol[n*3+1]=c[1]; pCol[n*3+2]=c[2];
+  }
+  particles.geometry.attributes.position.needsUpdate=true;
+  particles.geometry.attributes.color.needsUpdate=true;
+}
+
+function setVColor(vi, r,g,b){ fieldCol[vi*3]=r; fieldCol[vi*3+1]=g; fieldCol[vi*3+2]=b; }
+
+function updateField(){
+  const mode=params.mode;
+  if(mode==='dark'){ fieldMesh.visible=false; return; }
+  fieldMesh.visible=true;
+
+  if(mode==='vort'){
+    for(let j=1;j<NY-1;j++)for(let i=1;i<NX-1;i++){
+      const k=IX(i,j);
+      curl[k]=solid[k]?0:0.5*((v[k+1]-v[k-1])-(u[k+NX]-u[k-NX]));
+    }
+  }
+  // PlaneGeometry vertex order: row iy (top->bottom) fastest ix. index = iy*NX + ix.
+  // our grid j=0 is bottom, so grid j = (NY-1-iy).
+  for(let iy=0; iy<NY; iy++){
+    const j = NY-1-iy;
+    for(let ix=0; ix<NX; ix++){
+      const vi = iy*NX + ix;
+      const k = IX(ix,j);
+      if(solid[k]){ setVColor(vi, 0.09,0.16,0.23); continue; }
+      if(mode==='vort'){
+        // vortices glow on black: blue one spin, red the other, white-hot cores
+        const w = curl[k]*5.5;
+        const m = Math.min(1, Math.abs(w));
+        if(m < 0.05){ setVColor(vi, 0.02,0.04,0.07); }
+        else {
+          const wht = Math.max(0,(m-0.65)/0.35);   // blend to white in strong cores
+          if(w>=0){ setVColor(vi, 0.12*m+wht*0.85, 0.46*m+wht*0.85, Math.min(1,0.85*m+0.15)); }
+          else    { setVColor(vi, Math.min(1,0.95*m+0.10), 0.32*m+wht*0.80, 0.10*m+wht*0.55); }
+        }
+      } else { // speed
+        const spd=Math.hypot(u[k],v[k]);
+        const tt=Math.min(1, spd/(1.7*params.speed)+0.02);
+        const c=turbo(tt);
+        setVColor(vi, Math.min(1,c[0]*1.05), Math.min(1,c[1]*1.05), Math.min(1,c[2]*1.05));
+      }
+    }
+  }
+  fieldMesh.geometry.attributes.color.needsUpdate=true;
+}
+
+// ---------- camera orbit ----------
+function updateCamera(){
+  orbit.az += (orbit.tAz-orbit.az)*0.08;
+  orbit.el += (orbit.tEl-orbit.el)*0.08;
+  orbit.r  += (orbit.tR -orbit.r )*0.08;
+  const cx=domW/2, cy=domH/2, cz=0;
+  camera.position.set(
+    cx + orbit.r*Math.cos(orbit.el)*Math.sin(orbit.az),
+    cy + orbit.r*Math.sin(orbit.el),
+    cz + orbit.r*Math.cos(orbit.el)*Math.cos(orbit.az)
+  );
+  camera.up.set(0,1,0);
+  camera.lookAt(cx,cy,cz);
+}
+
+// ---------- main loop ----------
+let acc=0;
+function loop(){
+  requestAnimationFrame(loop);
+  if(!params.paused){
+    step(); step();          // two substeps per frame for stability at speed
+  }
+  updateField();
+  updateParticles();
+  updateCamera();
+  renderer.render(scene,camera);
+}
+
+/* ============================================================
+   UI wiring
+   ============================================================ */
+function reFromSlider(sv){ return Math.round(Math.pow(10, sv)); }  // 1.4..4.2 -> ~25..~16000
+function sliderFromRe(re){ return Math.log10(re); }
+
+function setRegime(){
+  const Re=params.Re;
+  const dot=document.getElementById('regimeDot');
+  const nm=document.getElementById('regimeName');
+  const ds=document.getElementById('regimeDesc');
+  if(Re<90){
+    dot.style.color='var(--laminar)';
+    nm.textContent='Laminar flow';
+    ds.textContent='Air slides past the object in smooth, orderly sheets. The equations stay well-behaved.';
+  } else if(Re<600){
+    dot.style.color='var(--amber)';
+    nm.textContent='Transitional flow';
+    ds.textContent='The wake starts to wobble. Small disturbances grow instead of dying out — the onset of instability.';
+  } else {
+    dot.style.color='var(--turb)';
+    nm.textContent='Turbulent wake';
+    ds.textContent='Vortices shed off the object in a von Kármán street. This chaotic regime is what makes Navier-Stokes so hard to pin down.';
+  }
+}
+
+function setModeCap(){
+  const el=document.getElementById('modeCap');
+  if(!el) return;
+  if(params.mode==='speed') el.textContent='Colour = how fast the air is moving at each point (dark slow, bright fast).';
+  else if(params.mode==='vort') el.textContent='Bright blobs are spinning air (vortices): blue spins one way, red the other. Turn Reynolds up and watch them peel off the object in a trail.';
+  else el.textContent='Smoke streams: each dot is a parcel of air carried by the flow.';
+}
+
+function addEventListeners(){
+  const re=document.getElementById('re'), reVal=document.getElementById('reVal');
+  const spd=document.getElementById('spd'), spdVal=document.getElementById('spdVal');
+  const aoa=document.getElementById('aoa'), aoaVal=document.getElementById('aoaVal');
+
+  re.addEventListener('input',()=>{ params.Re=reFromSlider(+re.value); reVal.textContent=params.Re; setRegime(); });
+  spd.addEventListener('input',()=>{ params.speed=+spd.value; spdVal.textContent=params.speed.toFixed(1)+'×'; });
+  aoa.addEventListener('input',()=>{ params.aoa=+aoa.value; aoaVal.textContent=params.aoa+'°'; buildObstacle(params.shape,params.aoa); if(foilMesh) foilMesh.rotation.z=-params.aoa*Math.PI/180; });
+
+  document.querySelectorAll('#modeSeg button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); params.mode=b.dataset.mode; setModeCap();
+    });
+  });
+
+  document.querySelectorAll('#shapeSeg button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#shapeSeg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); params.shape=b.dataset.shape;
+      buildObstacle(params.shape, params.aoa); buildObstacleMesh(); resetFlow();
+    });
+  });
+
+  document.getElementById('pLam').addEventListener('click',()=>applyPreset(45,0.9,4));
+  document.getElementById('pTurb').addEventListener('click',()=>applyPreset(4500,1.5,9));
+
+  document.getElementById('pauseBtn').addEventListener('click',(e)=>{
+    params.paused=!params.paused; e.target.textContent=params.paused?'Play':'Pause';
+  });
+  document.getElementById('resetBtn').addEventListener('click',resetFlow);
+
+  document.getElementById('learnBtn').addEventListener('click',()=>document.getElementById('sheet').classList.add('open'));
+  document.getElementById('closeSheet').addEventListener('click',()=>document.getElementById('sheet').classList.remove('open'));
+
+  const contactBtn=document.getElementById('contactBtn');
+  const contactCard=document.getElementById('contactCard');
+  if(contactBtn) contactBtn.addEventListener('click',()=>contactCard.classList.toggle('open'));
+
+  // orbit controls
+  const el=renderer.domElement;
+  let dragging=false, px=0, py=0;
+  const hint=document.getElementById('hint');
+  el.addEventListener('pointerdown',e=>{dragging=true;px=e.clientX;py=e.clientY; if(hint)hint.style.opacity=0;});
+  window.addEventListener('pointerup',()=>dragging=false);
+  window.addEventListener('pointermove',e=>{
+    if(!dragging)return;
+    orbit.tAz -= (e.clientX-px)*0.005;
+    orbit.tEl += (e.clientY-py)*0.004;
+    orbit.tEl=Math.max(-0.2,Math.min(1.35,orbit.tEl));
+    px=e.clientX; py=e.clientY;
+  });
+  el.addEventListener('wheel',e=>{
+    e.preventDefault();
+    orbit.tR=Math.max(80,Math.min(360,orbit.tR+e.deltaY*0.12));
+  },{passive:false});
+  window.addEventListener('resize',onResize);
+}
+
+function applyPreset(Re,speed,aoaDeg){
+  params.Re=Re; params.speed=speed; params.aoa=aoaDeg;
+  document.getElementById('re').value=sliderFromRe(Re);
+  document.getElementById('reVal').textContent=Re;
+  document.getElementById('spd').value=speed;
+  document.getElementById('spdVal').textContent=speed.toFixed(1)+'×';
+  document.getElementById('aoa').value=aoaDeg;
+  document.getElementById('aoaVal').textContent=aoaDeg+'°';
+  buildObstacle(params.shape,aoaDeg); buildObstacleMesh(); setRegime();
+}
+
+function resetFlow(){
+  u.fill(0); v.fill(0); p.fill(0);
+  setBounds();
+  for(let n=0;n<PN;n++) seedParticle(n,true);
+  if(particles){                       // force refresh so reset works even while paused
+    particles.geometry.attributes.position.needsUpdate=true;
+    particles.geometry.attributes.color.needsUpdate=true;
+  }
+}
+
+function onResize(){
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+}
+
+// ---------- render equations with KaTeX ----------
+function renderEquations(){
+  if(!window.katex){ return setTimeout(renderEquations,120); }
+  try{
+    katex.render("\\frac{\\partial \\mathbf{u}}{\\partial t} + (\\mathbf{u}\\cdot\\nabla)\\mathbf{u} = -\\frac{\\nabla p}{\\rho} + \\nu\\,\\nabla^2 \\mathbf{u} + \\mathbf{f}\\,, \\qquad \\nabla\\cdot\\mathbf{u} = 0",
+      document.getElementById('eq1'), {displayMode:true, throwOnError:false});
+    katex.render("\\mathrm{Re} = \\frac{\\text{speed}\\times\\text{size}}{\\text{viscosity}} = \\frac{U\\,L}{\\nu}",
+      document.getElementById('eq2'), {displayMode:true, throwOnError:false});
+  }catch(e){}
+}
+renderEquations();
+
+// ---------- boot ----------
+buildObstacle(params.shape, params.aoa);
+setBounds();
+initThree();
+setRegime();
+setModeCap();
+loop();
+</script>
+</body>
+</html>
