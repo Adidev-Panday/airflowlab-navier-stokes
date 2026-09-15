@@ -101,7 +101,6 @@
   }
   .dot{width:11px;height:11px;border-radius:50%;flex:none;box-shadow:0 0 12px currentColor}
   .regime .name{font-size:14px;font-weight:600}
-  .regime .desc{font-size:12.5px;color:var(--ink-dim);line-height:1.35;margin-top:1px}
 
   /* ---- Explainer ---- */
   .learn-btn{
@@ -161,7 +160,7 @@
     <span class="sub">A simulation of the Navier-Stokes Equations</span>
   </div>
 
-  <button class="learn-btn" id="learnBtn">What am I looking at?</button>
+  <button class="learn-btn" id="learnBtn">Click Me</button>
 
   <button class="contact-btn" id="contactBtn">Made by Adidev Panday</button>
   <div class="contact-card" id="contactCard">
@@ -225,10 +224,7 @@
 
   <div class="regime">
     <div class="dot" id="regimeDot" style="color:var(--laminar)"></div>
-    <div>
-      <div class="name" id="regimeName">Laminar flow</div>
-      <div class="desc" id="regimeDesc">Air slides over the wing in smooth, orderly sheets. The equations stay well-behaved.</div>
-    </div>
+    <div class="name" id="regimeName">Laminar flow</div>
   </div>
 
   <div class="hint" id="hint">Drag to orbit • scroll to zoom</div>
@@ -239,30 +235,30 @@
   <button class="close" id="closeSheet">Close</button>
   <div class="wrap">
     <h2>Seeing the Navier-Stokes equations</h2>
-    <p class="lede">Every wing, weather system, and river obeys one set of equations. This wind tunnel solves a version of them live, so you can watch orderly flow break down into turbulence — the exact phenomenon behind a million-dollar open problem in mathematics.</p>
+    <p class="lede">Every wing, weather system, and river obeys one set of equations. This wind tunnel solves a version of them live, so you can watch orderly flow break down into turbulence.</p>
 
     <h3>The equations</h3>
-    <p>The Navier-Stokes equations say that a fluid's momentum changes because of three things: the fluid pushing itself around, pressure differences, and internal friction (viscosity).</p>
+    <p>A fluid's momentum changes because of three things: the fluid pushing itself around, pressure differences, and internal friction (viscosity).</p>
     <div class="eq" id="eq1"></div>
-    <p>Here <b>u</b> is the velocity of the air at every point, p is pressure, ρ is density, ν is viscosity, and <b>f</b> is any external force. The second equation just says the air isn't compressed — what flows in flows out.</p>
+    <p><b>u</b> is velocity, p is pressure, ρ is density, ν is viscosity, and <b>f</b> is any external force. The second equation says the air isn't compressed: what flows in flows out.</p>
 
     <h3>The Reynolds number is the dial that matters</h3>
-    <p>The single number that decides whether flow stays smooth or turns chaotic is the Reynolds number: how strongly the air's own motion dominates over its internal friction.</p>
+    <p>This single number decides whether flow stays smooth or turns chaotic: how strongly the air's own motion dominates its internal friction.</p>
     <div class="eq" id="eq2"></div>
-    <p>Low Re means friction wins and flow stays laminar and glassy. High Re means the fluid's own momentum wins, and you get the swirling, shedding vortices you can trigger with the slider. Turn the Reynolds dial up and watch the wake fall apart into a repeating trail of vortices — a von Kármán vortex street.</p>
+    <p>Low Re means friction wins and flow stays laminar and glassy. High Re means the fluid's own momentum wins, giving the swirling, shedding vortices you can trigger with the slider, a von Kármán vortex street.</p>
 
     <h3>Why this is a Millennium Problem</h3>
-    <p>The Clay Mathematics Institute offers a $1,000,000 prize for the Navier-Stokes existence and smoothness problem. In three dimensions, nobody has been able to prove that smooth starting conditions always stay smooth forever — or find a case where the maths "blows up" into an infinite value. Turbulence, the thing you see forming in the wake here, is exactly what makes this so hard: the equations resist every known method.</p>
-    <p>In September 2026 this made global news when a proof was announced for a <em>forced</em> version of the 3D problem, and the Clay Institute said the problem had "apparently been settled." Credit and verification are still being worked through, and the classic <em>unforced</em> turbulence question that matters most for real aircraft is still not fully closed. So this remains one of the most alive problems in physics and maths.</p>
+    <p>The Clay Mathematics Institute offers a $1,000,000 prize for the Navier-Stokes existence and smoothness problem. In three dimensions, nobody has proven that smooth starting conditions always stay smooth forever, or found a case where the maths "blows up." Turbulence, the thing forming in the wake here, is exactly what makes this so hard.</p>
+    <p>In September 2026 this made global news when a proof was announced for a <em>forced</em> version of the 3D problem, and the Clay Institute said the problem had "apparently been settled." Credit and verification are still being worked through, and the classic <em>unforced</em> question that matters most for real aircraft is still not fully closed.</p>
 
     <h3>What this simulation is (and isn't)</h3>
     <ul>
-      <li>It solves a real 2D incompressible fluid model in your browser, in real time, using the "stable fluids" method with vorticity confinement to keep vortices crisp.</li>
-      <li>The Reynolds number is indicative: it maps to the solver's viscosity so you can see the laminar-to-turbulent transition, not to publish a precise drag figure.</li>
-      <li>It is a teaching visualiser — the goal is intuition about why turbulence is hard, not an engineering-grade CFD result.</li>
+      <li>A real 2D incompressible fluid model, solved live in your browser with the "stable fluids" method and vorticity confinement to keep vortices crisp.</li>
+      <li>The Reynolds number is indicative: it sets the solver's viscosity to show the laminar-to-turbulent transition, not to give a precise drag figure.</li>
+      <li>A teaching visualiser for intuition, not an engineering-grade CFD result.</li>
     </ul>
 
-    <p class="note">Built for the Woodstock School physics department as a teaching tool. Airflow over a NACA-style airfoil; drag to orbit the tunnel, adjust the wing's angle, and push the Reynolds number to feel where smooth flow ends.</p>
+    <p class="note">Built for the Woodstock School physics department. Drag to orbit, adjust the angle of attack, and push the Reynolds number to feel where smooth flow ends.</p>
   </div>
 </div>
 
@@ -789,19 +785,15 @@ function setRegime(){
   const Re=params.Re;
   const dot=document.getElementById('regimeDot');
   const nm=document.getElementById('regimeName');
-  const ds=document.getElementById('regimeDesc');
   if(Re<90){
     dot.style.color='var(--laminar)';
     nm.textContent='Laminar flow';
-    ds.textContent='Air slides past the object in smooth, orderly sheets. The equations stay well-behaved.';
   } else if(Re<600){
     dot.style.color='var(--amber)';
     nm.textContent='Transitional flow';
-    ds.textContent='The wake starts to wobble. Small disturbances grow instead of dying out — the onset of instability.';
   } else {
     dot.style.color='var(--turb)';
     nm.textContent='Turbulent wake';
-    ds.textContent='Vortices shed off the object in a von Kármán street. This chaotic regime is what makes Navier-Stokes so hard to pin down.';
   }
 }
 
